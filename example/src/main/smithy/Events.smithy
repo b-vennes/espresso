@@ -1,13 +1,15 @@
 $version: "2"
 
-namespace smithy4s.hello
+namespace example.events
 
-structure Person {
-  name: String,
-  town: String,
+structure Played {
+  @required
+  score: Long
+
+  @required
+  name: String
 }
 
-structure PersonEvent {
-  name: String,
-  town: String,
+union PinballTableEvent {
+  played: Played
 }
