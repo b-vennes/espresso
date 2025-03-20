@@ -16,6 +16,9 @@ list Scores {
 
 structure PinballTable {
   @required
+  id: Long
+
+  @required
   name: String
 
   @required
@@ -29,4 +32,46 @@ structure PinballTable {
 
   @required
   highScores: Scores
+}
+
+list PinballTables {
+  member: PinballTable
+}
+
+structure Cafe {
+  @required
+  tables: PinballTables
+
+  @required
+  level: Integer
+}
+
+structure Shop {
+  @required
+  lastUpdated: Timestamp
+
+  @required
+  available: PinballTables
+}
+
+structure Initialized {
+  @required
+  started: Timestamp
+
+  @required
+  lastUpdated: Timestamp
+
+  @required
+  credits: Long
+
+  @required
+  cafe: Cafe
+
+  @required
+  shop: Shop
+}
+
+union Game {
+  uninitialized: Unit
+  initialized: Initialized
 }

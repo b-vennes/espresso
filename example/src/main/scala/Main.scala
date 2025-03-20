@@ -1,70 +1,56 @@
-import cats.*
-import cats.effect.*
-import cats.data.*
-import cats.mtl.*
-import cats.syntax.all.*
-import espresso.*
-import example.events.*
-import example.states.*
+import GameOps.ambientUpdate
+import cats._
+import cats.data._
+import cats.effect._
+import cats.effect.std._
+import cats.mtl._
+import cats.syntax.all._
+import espresso._
+import espresso.syntax.given
+import example.events._
+import example.states._
+import smithy4s.Timestamp
+
+import scala.concurrent.duration._
 
 object Main extends IOApp.Simple {
+  val gameEventsIO = GameOps.gameEvents[IO]
+  val gameStateAggregateIO = GameOps.gameStateAggregate[IO]
 
-  def newTable(
-    events: Events[PinballTableEvent],
-    name: String,
-    manufacturer: String,
-  ): Aggregate[PinballTableEvent, PinballTable] =
-    Aggregate(
-      events,
-      PinballTable(
-        name,
-        manufacturer,
-        100,
-        100,
-        List.empty
-      ),
-      {
-        case (table, PinballTableEvent.PlayedCase(Played(score, name))) =>
-          table.copy(
-            currentHealth = table.currentHealth - 1,
-            highScores = table.highScores :+ Score(name, score)
-          )
-      }
-    )
-
-  val pinballTableEvents = Events[PinballTableEvent]
-  val starWarsTableAggregate = newTable(
-    pinballTableEvents,
-    "Star Wars",
-    "Stern"
-  )
-
-  def playTable[F[_]: Monad](
-    results: (Long, String)*
-  )(using
-    pinballTableEvents: Tell[F, PinballTableEvent]
-  ): F[Unit] =
-    results.traverse_(result =>
-      pinballTableEvents.tell(
-        PinballTableEvent.played(Played(result._1, result._2))
-      )
-    )
+  type F = StateT[IO, Chain[GameEvent], _]
 
   override def run: IO[Unit] = for {
-    initialEvents <- IO(Chain(
-      PinballTableEvent.played(Played(1009L, "Bert"))
-    ))
-    result <- IO(
-      pinballTableEvents(
-        playTable[pinballTableEvents.F](
-          2000L -> "ABC",
-          44L -> "ZZZ"
-        )
+    startTime <- IO.realTime
+    startEvent = GameEvent.start(
+      GameStart(
+        Timestamp.fromEpochMilli(startTime.toMillis)
       )
-      .productR(starWarsTableAggregate.agg)
-      .runA(initialEvents)
-      .value
     )
-    _ <- IO.println(result)
+    _ <- Chain(startEvent).tailRecM(events =>
+      Input
+        .readAction[IO]
+        .flatMap { action =>
+          given Tell[F, GameEvent] = gameEventsIO.tell
+          given Ask[F, Game] = gameStateAggregateIO.ask
+          (
+            ambientUpdate[F] *>
+              GameOps
+                .runAction[F](
+                  action,
+                  StateT.liftF(
+                    IO.println(
+                      events
+                        .map(_.toString)
+                        .mkString_("\n")
+                    )
+                  )
+                )
+          ).run(events)
+            .map {
+              case (events, true) => Left(events)
+              case (_, right)     => Right(())
+            }
+        }
+    )
   } yield ()
 }
