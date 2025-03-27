@@ -1,23 +1,21 @@
-import cats._
-import cats.data._
-import cats.effect._
-import cats.effect.std._
-import cats.mtl._
-import cats.syntax.all._
-import espresso._
-import example.actions._
-import example.events._
-import example.states._
-import monocle.syntax.all._
-import smithy4s.Timestamp
-
-import scala.concurrent.duration._
+import cats.*
+import cats.effect.*
+import cats.effect.std.*
+import cats.mtl.*
+import cats.syntax.all.*
+import espresso.*
+import example.actions.*
+import example.events.*
+import example.states.*
+import monocle.macros.*
+import monocle.syntax.all.*
 
 object GameOps {
 
   given Show[PinballTable] = table => show"""A ${table.name}.
           |Manufactured by ${table.manufacturer}.
           |Looks to be at ${table.currentHealth}%.
+          |Like it?  It's yours with 'purchase ${table.id}'.
           |""".stripMargin
 
   given [A: Show]: Show[List[A]] = list =>
@@ -35,78 +33,55 @@ object GameOps {
           |
           |${cafe.tables}""".stripMargin
 
-  object GameEvents {
-    object Start {
-      def unapply(pattern: (Game, GameEvent)): Option[GameStart] =
-        pattern match {
-          case (_, GameEvent.StartCase(gameStart)) => Some(gameStart)
-          case _                                   => None
-        }
-    }
-
-    object Update {
-      def merge(state: Initialized, update: GameUpdate): Initialized =
-        update.shopEvents.foldLeft(
-          state
-            .focus(_.lastUpdated)
-            .set(update.time)
-            .focus(_.shop.lastUpdated)
-            .modify(lastUpdated =>
-              if (update.shopEvents.nonEmpty) then update.time
-              else lastUpdated
-            )
-        ) {
-          case (
-                state,
-                ShopUpdateEvent.TableAddedCase(TableAddedToShop(table))
-              ) =>
-            state.focus(_.shop.available).modify(table :: _)
-          case (
-                state,
-                ShopUpdateEvent.TableRemovedCase(TableRemovedFromShop(id))
-              ) =>
-            state
-              .focus(_.shop.available)
-              .modify(_.filter(_.id != id))
-        }
-
-      def unapply(
-          pattern: (Game, GameEvent)
-      ): Option[Initialized] =
-        pattern match {
-          case (
-                Game.InitializedCase(initialized),
-                GameEvent.UpdateCase(update)
-              ) =>
-            Some(merge(initialized, update))
-          case _ => None
-        }
-    }
-  }
-
   def gameEvents[F[_]: Monad] = EventsT[F, GameEvent]
-  def gameStateAggregate[F[_]: Monad] = AggregateT(
-    gameEvents,
-    Game.uninitialized(),
-    {
-      case GameEvents.Start(GameStart(time)) =>
-        Game.initialized(
-          Initialized(
-            time,
-            time,
-            1000L,
-            Cafe(
-              Nil,
-              0
-            ),
-            Shop(time, Nil)
+  def gameStateAggregate[F[_]: Monad](using
+    random: Random[F],
+    clock: Clock[F]
+  ) =
+  random.shuffleList(assets.PinballTables.all)
+    .map(_.take(3).zipWithIndex)
+    .flatMap(_.traverse { case (description, index) =>
+      random.betweenInt(25, 100).flatMap(maxHealth =>
+        random.betweenInt(1, maxHealth).flatMap(currentHealth =>
+          clock.realTime.map(currentTime =>
+            PinballTable(
+              index + (currentTime.toMillis % 10000),
+              description.name,
+              description.manufacturer,
+              maxHealth,
+              currentHealth,
+              List.empty
+            )
           )
         )
-      case GameEvents.Update(game) =>
-        Game.initialized(game)
-      case (s, _) => s
-    }
-  )
+      )
+    })
+    .map(startingTables =>
+      AggregateT(
+        gameEvents,
+        Game.uninitialized(),
+        {
+          case GameEvents.Start(GameStart(time)) =>
+            Game.initialized(
+              Initialized(
+                time,
+                time,
+                1000L,
+                Cafe(
+                  Nil,
+                  0
+                ),
+                Shop(time, startingTables)
+              )
+            )
+          case GameEvents.Update(game) =>
+            Game.initialized(game)
+          case GameEvents.TablePurchased(game) =>
+            Game.initialized(game)
+          case (s, _) => s
+        }
+      )
+    )
 
   def runViewShopInventory[F[_]: Monad](using
       agg: Ask[F, Game],
@@ -132,6 +107,29 @@ object GameOps {
     }
   } yield ()
 
+  def runPurchaseTable[F[_]: Monad](tableId: Long)(using
+      events: Tell[F, GameEvent],
+      agg: Ask[F, Game],
+      console: Console[F]
+  ): F[Unit] = for {
+    state <- agg.ask
+    maybeGame = GenPrism[Game, Game.InitializedCase]
+      .andThen(GenLens[Game.InitializedCase](_.initialized))
+      .getOption(state)
+    _ <- maybeGame
+      .flatMap(game => game.shop.available.find(_.id === tableId))
+      .fold(
+        console
+          .println(s"Sorry pal!  We don't have any tables with ID '$tableId'.")
+      )(table =>
+        events.tell(
+          GameEvent.tablePurchased(
+            TablePurchased(table)
+          )
+        )
+      )
+  } yield ()
+
   def runAction[F[_]: Monad](action: GameAction, debugEvents: F[Unit])(using
       events: Tell[F, GameEvent],
       state: Ask[F, Game],
@@ -144,80 +142,9 @@ object GameOps {
         runViewCafe.as(true)
       case GameAction.DebugEventsCase =>
         debugEvents.as(true)
+      case GameAction.PurchaseTableCase(PurchaseTable(tableId)) =>
+        runPurchaseTable(tableId).as(true)
       case GameAction.ExitCase =>
         false.pure[F]
     }
-
-  val updateEvery = 5000.millis
-
-  val updateShopEvery = 30.seconds.toMillis
-
-  def ambientShopUpdate(
-      currentTime: Long,
-      shop: Shop
-  ): Chain[ShopUpdateEvent] = {
-    val shopLastUpdated = shop.lastUpdated.epochMilli
-
-    if (currentTime - shopLastUpdated) > updateShopEvery then {
-      Chain(
-        ShopUpdateEvent.tableAdded(
-          TableAddedToShop(
-            PinballTable(
-              currentTime,
-              "Total Nuclear Annihlation",
-              "Spooky Pinball",
-              95,
-              75,
-              Nil
-            )
-          )
-        )
-      )
-    } else {
-      Chain.empty
-    }
-  }
-
-  def ambientUpdate[F[_]: Monad](using
-      events: Tell[F, GameEvent],
-      state: Ask[F, Game],
-      console: Console[F],
-      clock: Clock[F]
-  ): F[Unit] = for {
-    currentTime <- clock.realTime
-    currentTimestamp = currentTime.toMillis
-    initialLastUpdated <- state.ask.map {
-      case Game.InitializedCase(game) => game.lastUpdated.epochMilli.some
-      case _                          => none
-    }
-    _ <- initialLastUpdated
-      .map(
-        _.tailRecM(mockTime =>
-          if (mockTime > currentTimestamp)
-            val mockTimestamp = Timestamp.fromEpochMilli(mockTime)
-            ().asRight.pure[F]
-          else {
-            val mockTimestamp = Timestamp.fromEpochMilli(mockTime)
-            state.ask.flatMap {
-              case Game.InitializedCase(game) =>
-                ambientShopUpdate(mockTime, game.shop)
-                  .pure[F]
-                  .flatTap(shopEvents =>
-                    events.tell(
-                      GameEvent.update(
-                        GameUpdate(
-                          Timestamp.fromEpochMilli(mockTime),
-                          shopEvents.toList
-                        )
-                      )
-                    )
-                  )
-                  .as(Left(mockTime + updateEvery.toMillis))
-              case _ => ().asRight.pure[F]
-            }
-          }
-        )
-      )
-      .getOrElse(().pure[F])
-  } yield ()
 }

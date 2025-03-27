@@ -1,11 +1,13 @@
 package espresso
 
-import cats.data._
-import cats.effect._
+import cats.Applicative
+import cats.data.*
+import cats.effect.*
 import cats.effect.kernel.Unique.Token
-import cats.syntax.all._
+import cats.effect.std.Random
+import cats.syntax.all.*
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 object syntax {
   final class TemporalStateT[F[_], S](using
@@ -80,4 +82,78 @@ object syntax {
 
   given [F[_], S](using Temporal[F]): Temporal[StateT[F, S, _]] =
     new TemporalStateT[F, S]()
+
+  final class RandomStateT[F[_]: Applicative, S](using
+      random: Random[F]
+  ) extends Random[StateT[F, S, _]] {
+
+    override def betweenDouble(
+        minInclusive: Double,
+        maxExclusive: Double
+    ): StateT[F, S, Double] =
+      StateT.lift(random.betweenDouble(minInclusive, maxExclusive))
+
+    override def betweenFloat(
+        minInclusive: Float,
+        maxExclusive: Float
+    ): StateT[F, S, Float] =
+      StateT.lift(random.betweenFloat(minInclusive, maxExclusive))
+
+    override def betweenInt(
+        minInclusive: Int,
+        maxExclusive: Int
+    ): StateT[F, S, Int] =
+      StateT.lift(random.betweenInt(minInclusive, maxExclusive))
+
+    override def betweenLong(
+        minInclusive: Long,
+        maxExclusive: Long
+    ): StateT[F, S, Long] =
+      StateT.lift(random.betweenLong(minInclusive, maxExclusive))
+
+    override def nextAlphaNumeric: StateT[F, S, Char] =
+      StateT.lift(random.nextAlphaNumeric)
+
+    override def nextBoolean: StateT[F, S, Boolean] =
+      StateT.lift(random.nextBoolean)
+
+    override def nextBytes(n: Int): StateT[F, S, Array[Byte]] =
+      StateT.lift(random.nextBytes(n))
+
+    override def nextDouble: StateT[F, S, Double] =
+      StateT.lift(random.nextDouble)
+
+    override def nextFloat: StateT[F, S, Float] =
+      StateT.lift(random.nextFloat)
+
+    override def nextGaussian: StateT[F, S, Double] =
+      StateT.lift(random.nextGaussian)
+
+    override def nextInt: StateT[F, S, Int] =
+      StateT.lift(random.nextInt)
+
+    override def nextIntBounded(n: Int): StateT[F, S, Int] =
+      StateT.lift(random.nextIntBounded(n))
+
+    override def nextLong: StateT[F, S, Long] =
+      StateT.lift(random.nextLong)
+
+    override def nextLongBounded(n: Long): StateT[F, S, Long] =
+      StateT.lift(random.nextLongBounded(n))
+
+    override def nextPrintableChar: StateT[F, S, Char] =
+      StateT.lift(random.nextPrintableChar)
+
+    override def nextString(length: Int): StateT[F, S, String] =
+      StateT.liftF(random.nextString(length))
+
+    override def shuffleList[A](l: List[A]): StateT[F, S, List[A]] =
+      StateT.lift(random.shuffleList(l))
+
+    override def shuffleVector[A](v: Vector[A]): StateT[F, S, Vector[A]] =
+      StateT.lift(random.shuffleVector(v))
+  }
+
+  given [F[_]: Applicative, S](using Random[F]): Random[StateT[F, S, _]] =
+    new RandomStateT[F, S]
 }

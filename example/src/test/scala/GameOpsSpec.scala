@@ -1,13 +1,13 @@
-import GameOps._
-import cats._
-import cats.data._
-import cats.effect._
-import cats.effect.std._
+import GameOps.*
+import cats.*
+import cats.data.*
+import cats.effect.*
+import cats.effect.std.*
 import cats.mtl.Ask
 import cats.mtl.Tell
-import cats.syntax.all._
-import example.events._
-import example.states._
+import cats.syntax.all.*
+import example.events.*
+import example.states.*
 import smithy4s.Timestamp
 
 import java.nio.charset.Charset

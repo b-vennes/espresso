@@ -1,8 +1,9 @@
-import cats._
-import cats.effect.std._
-import cats.parse._
-import cats.syntax.all._
-import example.actions._
+import cats.*
+import cats.effect.std.*
+import cats.parse.*
+import cats.syntax.all.*
+import example.actions.*
+import cats.parse.Rfc5234.*
 
 object Input {
 
@@ -33,7 +34,11 @@ object Input {
         whitespace.rep.void *>
         Parser
           .string("events")
-          .as(GameAction.debugEvents())
+          .as(GameAction.debugEvents()) |
+        Parser.string("purchase") *>
+        whitespace.rep.void *>
+        digit.rep.map(digits => digits.mkString_("").toLong)
+          .map(id => GameAction.purchaseTable(PurchaseTable(id)))
     )
 
   def readAction[F[_]](using
@@ -47,7 +52,7 @@ object Input {
           case Left(error) =>
             console
               .println(
-                show"Invalid action provided (parsing error is $error). Options are 'view shop' or 'view cafe'."
+                show"Actions are 'view shop' or 'view cafe'."
               )
               .as(None)
           case Right((_, action)) =>

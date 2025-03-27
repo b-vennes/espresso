@@ -49,6 +49,11 @@ structure GameUpdate {
   shopEvents: ShopUpdateEvents
 }
 
+structure TablePurchased {
+  @required
+  table: PinballTable
+}
+
 structure PurchasedCoffeeBatch {
   @required
   strength: Integer
@@ -71,5 +76,6 @@ structure SoldCoffees {
 union GameEvent {
   start: GameStart
   update: GameUpdate
+  tablePurchased: TablePurchased
   purchasedCoffeeBatch: PurchasedCoffeeBatch
 }

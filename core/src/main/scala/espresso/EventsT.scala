@@ -1,9 +1,9 @@
 package espresso
 
-import cats._
-import cats.data._
-import cats.mtl._
-import cats.syntax.all._
+import cats.*
+import cats.data.*
+import cats.mtl.*
+import cats.syntax.all.*
 
 final case class EventsT[F[_], A](tell: Tell[StateT[F, Chain[A], _], A]) {
   type G = StateT[F, Chain[A], _]

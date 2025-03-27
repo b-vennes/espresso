@@ -1,8 +1,8 @@
 package espresso
 
-import cats._
-import cats.data._
-import cats.mtl._
+import cats.*
+import cats.data.*
+import cats.mtl.*
 
 final case class AggregateT[F[_], A, S](
     ask: Ask[StateT[F, Chain[A], _], S]
